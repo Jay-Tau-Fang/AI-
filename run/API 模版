@@ -1,0 +1,41 @@
+接口名称：修改设备状态
+接口用途：设备进入或退出检修时更新台账管理状态。
+          变更须关联有效检修作业票，且只允许按状态机规则流转。
+Method + Endpoint：PATCH /api/v1/equipment/{tagNo}/status
+
+谁可以调用：
+  认证方式：JWT，Authorization: Bearer {token}
+  允许角色：设备管理员、装置工艺工程师
+  数据范围：仅限用户所属装置内的设备
+  禁止：外包账号、停用账号
+
+需要传入什么：
+  tagNo    path  字符串  必填  格式 ^[A-Z]{1,2}-\d{3}[A-Z]?$   例：P-101A
+  status   body  枚举    必填  在用/备用/检修中/停用/报废      例：检修中
+  ticketNo body  字符串  条件  改检修中/停用时必填              例：JX-2026-0912
+  version  body  整数    必填  乐观锁版本号                      例：7
+  reason   body  字符串  选填  ≤200 字                          例：机械密封泄漏
+
+成功返回什么：
+  200 OK
+  { "code":"OK",
+    "data":{ "tagNo":"P-101A","previousStatus":"在用",
+             "currentStatus":"检修中","ticketNo":"JX-2026-0912",
+             "operator":"张伟","operatedAt":"2026-09-10T15:20:00+08:00",
+             "version":8 },
+    "traceId":"8f3a2c1d" }
+
+可能怎样失败：
+  401 TOKEN_EXPIRED      令牌过期          → 重新登录
+  403 FORBIDDEN_UNIT     不在可见装置内    → 提示无权操作
+  404 EQUIPMENT_NOT_FOUND 位号不存在/无权  → 提示并推荐相似位号
+  409 INVALID_TRANSITION 状态机不允许      → 提示当前状态与可选下一步
+  409 VERSION_MISMATCH   数据已被改        → 提示刷新重试
+  422 TICKET_REQUIRED    缺作业票号        → 提示先关联作业票
+  422 INVALID_TICKET     作业票无效        → 提示核对作业票
+  429 RATE_LIMITED       操作太频繁        → 30 秒后重试
+  503 DB_UNAVAILABLE     数据库故障        → 稍后重试，显示 traceId
+
+副作用与留痕：写设备状态变更历史表；通知工艺与调度；审计日志记录操作人/时间/前后状态/作业票号
+幂等性：同一 version 重复提交，第二次返回 409 VERSION_MISMATCH，不产生重复记录
+性能要求：P95 < 500ms
